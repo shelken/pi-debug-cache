@@ -240,7 +240,12 @@ function writeLatest(
   );
 }
 
-function recordPrompt(ctx: any, sequence: number): PromptRecord | undefined {
+function nextSequence(existing: SessionIndex | undefined): number {
+  if (!existing || existing.records.length === 0) return 0;
+  return existing.records.length;
+}
+
+function recordPrompt(ctx: any): PromptRecord | undefined {
   const sessionId = getSessionId(ctx);
   if (!sessionId) return undefined;
 
@@ -254,6 +259,8 @@ function recordPrompt(ctx: any, sequence: number): PromptRecord | undefined {
   const hash = sha256(prompt);
   const now = new Date().toISOString();
   const existing = readIndex(dir);
+  // 变更原因：扩展 reload 会重置内存计数，必须从持久化记录推导序号，避免覆盖 diff/prompt 文件。
+  const sequence = nextSequence(existing);
   const previous = existing?.records.at(-1);
   const changed = !previous || previous.hash !== hash;
 
@@ -315,7 +322,6 @@ function recordPrompt(ctx: any, sequence: number): PromptRecord | undefined {
 
 export default function piDebugCache(pi: ExtensionAPI) {
   let config: Config | undefined;
-  let sequence = 0;
   let latestRecord: PromptRecord | undefined;
   let latestCacheHitPercent: number | undefined;
   let currentSessionId: string | undefined;
@@ -325,18 +331,19 @@ export default function piDebugCache(pi: ExtensionAPI) {
     if (!config.enabled) return;
 
     currentSessionId = getSessionId(ctx);
-    sequence = 0;
     latestRecord = undefined;
     latestCacheHitPercent = undefined;
   });
 
   pi.on("agent_end", (event, ctx) => {
-    if (config?.enabled === false) return;
+    if (config?.enabled !== true) return;
 
-    latestRecord = recordPrompt(ctx, sequence) ?? latestRecord;
+    const record = recordPrompt(ctx);
+    if (!record) return;
+    latestRecord = record;
 
     const sessionId = getSessionId(ctx);
-    if (!sessionId || !latestRecord) return;
+    if (!sessionId) return;
 
     const usage = collectUsage(event.messages ?? []);
     const cacheHitPercent = computeCacheHitPercent(
@@ -349,13 +356,13 @@ export default function piDebugCache(pi: ExtensionAPI) {
     const dir = sessionDir(sessionId);
     mkdirSync(dir, { recursive: true });
     appendJsonLine(join(dir, "turns.jsonl"), {
-      sequence,
+      sequence: record.sequence,
       timestamp: new Date().toISOString(),
       event: "agent_end",
-      systemPromptHash: latestRecord.hash,
-      systemPromptChanged: latestRecord.changed,
-      promptPath: latestRecord.promptPath,
-      diffPath: latestRecord.diffPath,
+      systemPromptHash: record.hash,
+      systemPromptChanged: record.changed,
+      promptPath: record.promptPath,
+      diffPath: record.diffPath,
       assistantMessages: usage.assistantMessages,
       provider: usage.provider,
       model: usage.model,
@@ -366,7 +373,6 @@ export default function piDebugCache(pi: ExtensionAPI) {
       totalTokens: usage.totalTokens,
       cacheHitPercent,
     });
-    sequence += 1;
   });
 
   pi.registerCommand("debug-cache", {

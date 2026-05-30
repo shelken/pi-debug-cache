@@ -85,6 +85,7 @@ cp -r pi-debug-cache ~/.pi/agent/extensions/
 - `turns.jsonl` 是逐轮 cache usage 记录，每行一个 JSON 对象
 - `prompts/*.txt` 保存完整 system prompt，仅在 hash 变化时新增
 - `diffs/*.diff` 保存本次 prompt 与上一次 prompt 的行级 diff，仅在 hash 变化时新增
+- 文件名序号来自已落盘的 `index.json` 记录数；即使 `/reload` 或扩展重启，也不会从 `0000` 重新开始覆盖旧 diff
 
 产物永久保留。仅打开 session 不会创建目录；第一次 agent run 结束后才会创建对应 session 目录。需要清理时可直接删除对应 session 目录或整个 `~/.pi/agent/debug-cache/`。
 
@@ -95,6 +96,7 @@ session_start:
   1. 加载配置
   2. 重置内存状态
   3. 不创建目录，不写入文件
+  4. 不重置已落盘 session 序号
 
 agent_end:
   1. 读取 ctx.getSystemPrompt()
